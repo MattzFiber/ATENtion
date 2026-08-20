@@ -150,8 +150,13 @@ files are MPL-2.0; see `src/ATENtion.Aspeed.Native/LICENSE`.
 
 ### The connection fails with a TLS handshake or certificate error. What now?
 
-The client certificate Supermicro bundles with iKVM has expired (around mid-2026), so a
-TLS handshake on a correctly-set clock is refused. Two ways around it:
+ATENtion 1.1.1 and later embed Supermicro's renewed iKVM client certificate from X10
+AST2400 firmware 04.07. The certificate is valid from May 2026 through May 2041, so the
+BMC clock must be set correctly. Older ATENtion releases embed the certificate that
+expired in May 2026 and cannot authenticate to firmware 04.07.
+
+For older BMC firmware that still trusts the previous certificate, the available
+workarounds are:
 
 1. **Roll the BMC clock back.** In the BMC web UI, under Configuration > Date and Time,
    set the date to before the client-certificate expiry (for example 2024), then reconnect.
@@ -161,8 +166,8 @@ TLS handshake on a correctly-set clock is refused. Two ways around it:
    web UI. The BMC then serves the plain-text iKVM port (63630) and no certificate is
    involved. ATENtion connects to it directly.
 
-You can also drop a renewed `client.pfx` next to `ATENtion.exe`. A certificate file found
-beside the executable overrides the one built into the application.
+You can also drop a firmware-matching `client.pfx` next to `ATENtion.exe`. A certificate
+file found beside the executable overrides the one built into the application.
 
 ### Auto-arm or token mode, and why?
 

@@ -15,7 +15,7 @@
     <RootNamespace>ATENtion.App</RootNamespace>
     <AssemblyName>ATENtion</AssemblyName>
     <ApplicationIcon>atention.ico</ApplicationIcon>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Product>ATENtion</Product>
     <Description>Native console (KVM/virtual media) client for Supermicro/ATEN BMCs.</Description>
     <Authors>Thomas Jones</Authors>
@@ -33,7 +33,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Supermicro's generic iKVM client certificate (for mutual TLS to the BMC KVM port).
+    <!-- Supermicro's renewed generic iKVM client certificate from X10 AST2400 firmware 04.07
+         (for mutual TLS to the BMC KVM port).
          Baked into the binary so no loose file is needed; a client.pfx placed next to the exe
          still overrides it (e.g. a renewed cert). It is the same public vendor cert shipped in
          every iKVM jar (CN=IPMI, O=Super Micro Computer) - not per-device. -->
