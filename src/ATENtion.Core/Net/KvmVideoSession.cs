@@ -105,22 +105,12 @@ namespace ATENtion.Core.Net
         public int StallTimeoutSeconds { get; set; } = 10;
 
         /// <summary>How long (in 1s timer ticks) without ANY full frame before the timer forces a
-        /// non-incremental refresh. This is a backstop against drift/stale tiles: the counter resets
-        /// whenever a full frame is requested for any reason (keyframe, resolution change, manual
-        /// refresh).
-        /// <para>
-        /// Disabled by default. A forced full frame is by far the most expensive thing the session
-        /// can ask for, and at a five-second interval it dominated the video budget: measured
-        /// against an AST2500 board, a session with this disabled ran at 141 decoded frames per
-        /// second and 176 kbps, while the same session at an interval of five ran 40-108 frames per
-        /// second and 761-2390 kbps, and an interval of one fell to 8-21 frames per second at
-        /// 3 Mbps. The cost scales with resolution and screen complexity, so on a busy console the
-        /// forced frame can stall video long enough to trip the UI's "waiting for video" overlay,
-        /// and in the worst case <see cref="StallTimeoutSeconds"/>, which drops the connection.
-        /// </para>
-        /// Stale tiles are better repaired by View > Refresh, which requests a full frame on
-        /// demand.</summary>
-        public int FullRefreshIntervalTicks { get; set; } = 0;
+        /// non-incremental refresh. This is an adaptive backstop against drift/stale tiles: the
+        /// counter resets whenever a full frame is requested for any reason (keyframe, resolution
+        /// change, manual refresh), so a quiet, healthy session rarely pays the full-frame cost.
+        /// The native viewer also periodically forces a full frame (updateImage's +0x5c flag).
+        /// 0 disables.</summary>
+        public int FullRefreshIntervalTicks { get; set; } = 5;
 
         /// <summary>Optional floor (ms) between incremental frame requests (video FPS cap). The earlier
         /// 80ms cap was only needed while the keyframe storm saturated the BMC and
@@ -130,17 +120,12 @@ namespace ATENtion.Core.Net
         public int MinFrameIntervalMs { get; set; } = 0;
         private int _lastRequestTick;
 
-        /// <summary>How many FramebufferUpdateRequests to keep in flight, so the BMC encodes the next
-        /// frame while the current one is decoded and presented. At a depth of one every frame costs
-        /// a full round trip with no overlap.
-        /// <para>
-        /// This was reduced to one to chase duplicated and displaced text blocks on ASPEED delta
-        /// frames. That corruption was investigated alongside a channel-order fault in the ASPEED
-        /// decoder; with the decoder corrected the depth is restored to two. If ordered-only
-        /// behaviour turns out to still be needed on some firmware, set this back to one - it is the
-        /// single value that switches between the two modes.
-        /// </para></summary>
-        public int PipelineDepth { get; set; } = 2;
+        /// <summary>How many FramebufferUpdateRequests to keep in flight. ASPEED delta frames must be
+        /// requested and applied in strict request/response order: allowing two outstanding requests
+        /// made some firmware encode the next delta against a baseline the client had not displayed,
+        /// producing duplicated or displaced text blocks. Keep the default at one. Higher values are
+        /// retained only as an explicit compatibility/performance experiment.</summary>
+        public int PipelineDepth { get; set; } = 1;
 
         /// <summary>FBURs sent but not yet answered by a FramebufferUpdate. Held ~= PipelineDepth;
         /// drives the steady-state top-up and the timer's liveness watchdog.</summary>
