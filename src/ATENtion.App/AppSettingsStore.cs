@@ -46,6 +46,14 @@ namespace ATENtion.App
         public bool AutoReconnect = true;
         public bool EnableLogging;
         public int MouseMode = 1;
+        /// <summary>Seconds between full frame requests; 0 sends incremental requests only, -1 asks every frame.</summary>
+        public int FullFrameIntervalSeconds = 5;
+        /// <summary>ATEN chroma mode: 444 Enhanced Text (default) or 422 Normal.</summary>
+        public int ImageMode = 444;
+        /// <summary>ATEN image quality level, 0 through 11 (default 11).</summary>
+        public int ImageQuality = 11;
+        /// <summary>True to let tabs that are not visible keep requesting video.</summary>
+        public bool StreamAllTabs;
         public string LastProfileId = "";
         public readonly List<StoredConnectionProfile> Profiles = new List<StoredConnectionProfile>();
 
@@ -89,7 +97,11 @@ namespace ATENtion.App
                     new XAttribute("smoothScaling", SmoothScaling),
                     new XAttribute("autoReconnect", AutoReconnect),
                     new XAttribute("enableLogging", EnableLogging),
-                    new XAttribute("mouseMode", MouseMode));
+                    new XAttribute("mouseMode", MouseMode),
+                    new XAttribute("fullRefreshSeconds", FullFrameIntervalSeconds),
+                    new XAttribute("imageMode", ImageMode),
+                    new XAttribute("imageQuality", ImageQuality),
+                    new XAttribute("streamAllTabs", StreamAllTabs));
 
                 var profiles = new XElement("Connections",
                     new XAttribute("lastProfileId", LastProfileId ?? ""));
@@ -149,6 +161,10 @@ namespace ATENtion.App
                     result.AutoReconnect = Bool(ui, "autoReconnect", true);
                     result.EnableLogging = Bool(ui, "enableLogging");
                     result.MouseMode = Int(ui, "mouseMode", 1);
+                    result.FullFrameIntervalSeconds = Int(ui, "fullRefreshSeconds", 5);
+                    result.ImageMode = Int(ui, "imageMode", 444);
+                    result.ImageQuality = Int(ui, "imageQuality", 11);
+                    result.StreamAllTabs = Bool(ui, "streamAllTabs");
                 }
 
                 var connections = root.Element("Connections");
