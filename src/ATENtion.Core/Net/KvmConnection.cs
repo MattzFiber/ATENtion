@@ -108,6 +108,9 @@ namespace ATENtion.Core.Net
         {
             Diagnostics.KvmLog.Write($"TCP connecting to {_options.Host}:{_options.Port} (timeout {_options.ConnectTimeoutMs}ms)...");
             _tcp = new TcpClient { NoDelay = true };
+            // Frames are tens of KB and can arrive every round trip, so the default window stalls
+            // the sender mid-frame. Matches the native viewer and the virtual-media path.
+            try { _tcp.ReceiveBufferSize = 0x88b80; _tcp.SendBufferSize = 0x88b80; } catch { }
             if (!_tcp.ConnectAsync(_options.Host, _options.Port).Wait(_options.ConnectTimeoutMs))
                 throw new TimeoutException($"Timed out connecting to {_options.Host}:{_options.Port}.");
             Diagnostics.KvmLog.Write("TCP connected.");

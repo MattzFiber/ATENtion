@@ -127,6 +127,56 @@ namespace ATENtion.Core.Net
         /// retained only as an explicit compatibility/performance experiment.</summary>
         public int PipelineDepth { get; set; } = 1;
 
+        /// <summary>At least two while every frame is full.</summary>
+        /// <remarks>
+        /// Depth one exists to apply delta frames in order against the displayed baseline. A full
+        /// frame is self-contained, so that constraint does not apply and the round trip can overlap.
+        /// </remarks>
+        private int EffectivePipelineDepth =>
+            AlwaysRequestFullFrames ? Math.Max(PipelineDepth, 2) : PipelineDepth;
+
+        /// <summary>
+        /// Request every frame as a full, non-incremental update.
+        /// </summary>
+        /// <remarks>
+        /// ATEN/ASPEED firmware only re-encodes the console for a non-incremental request;
+        /// incremental ones are answered from a cached encode. Full frames are therefore the only
+        /// fresh ones, at roughly 7x the bandwidth.
+        /// </remarks>
+        public bool AlwaysRequestFullFrames { get; set; }
+
+        /// <summary>
+        /// Stop requesting video while keeping the session, its keepalive and any mounted media up.
+        /// </summary>
+        /// <remarks>
+        /// Used for tabs that are not visible. The stall watchdog is suppressed while paused,
+        /// since it would otherwise read the expected silence as a dead link and reconnect.
+        /// </remarks>
+        public bool VideoPaused
+        {
+            get => _videoPaused;
+            set
+            {
+                if (_videoPaused == value) return;
+                _videoPaused = value;
+                if (!value) ResumeVideo();
+            }
+        }
+        private volatile bool _videoPaused;
+
+        // Re-arm after a pause: the watchdog's clock has to be reset before requests resume, or the
+        // silence accumulated while paused counts against it. A full frame repaints the surface,
+        // which is needed anyway since nothing was decoded while hidden.
+        private void ResumeVideo()
+        {
+            if (!_running) return;
+            LastMessageUtc = DateTime.UtcNow;
+            System.Threading.Interlocked.Exchange(ref _probedThisStall, 0);
+            System.Threading.Volatile.Write(ref _outstanding, 0);
+            try { SendUpdate(incremental: false); }
+            catch (Exception ex) { OnSendFault(ex); }
+        }
+
         /// <summary>FBURs sent but not yet answered by a FramebufferUpdate. Held ~= PipelineDepth;
         /// drives the steady-state top-up and the timer's liveness watchdog.</summary>
         private int _outstanding;
@@ -152,11 +202,34 @@ namespace ATENtion.Core.Net
         /// Drives the stall watchdog.</summary>
         public DateTime LastMessageUtc { get; private set; }
 
+        /// <summary>Whether the BMC is producing a picture, inferred from the video stream.</summary>
+        /// <remarks>
+        /// The protocol has no power status, so this reads the no-signal marker instead. Present is
+        /// certain; Absent means no picture, which is usually a powered-down host but also matches
+        /// one that is running and not producing video.
+        /// </remarks>
+        public VideoSignalState VideoSignal { get; private set; } = VideoSignalState.Unknown;
+
         /// <summary>Input-control state from the server privilege grant (msg 0x39): true = this session
         /// controls input, false = view-only, null = not yet reported. See <see cref="PrivilegeChanged"/>.</summary>
         public bool? Controlling { get; private set; }
         /// <summary>The server's privilege/session string (<c>&lt;sid&gt; ROLE &lt;clientip&gt;</c>).</summary>
         public string PrivilegeInfo { get; private set; }
+
+        /// <summary>
+        /// Every console session the BMC currently reports, as <c>&lt;sid&gt; &lt;user&gt; &lt;client ip&gt;</c>.
+        /// </summary>
+        /// <remarks>
+        /// The BMC answers with one privilege record per active session, indexed downwards, so a burst
+        /// of records beginning at the session count and ending at 1 is one complete list. The list is
+        /// replaced only when a burst completes, so a reader never sees a half-built one.
+        /// </remarks>
+        public System.Collections.Generic.IReadOnlyList<string> Sessions { get; private set; } =
+            new string[0];
+
+        private readonly System.Collections.Generic.List<string> _pendingSessions =
+            new System.Collections.Generic.List<string>();
+        private uint _lastPrivilegeIndex;
 
         public KvmVideoSession(KvmConnectionOptions options, IRfbAuthenticator authenticator = null)
         {
@@ -201,7 +274,7 @@ namespace ATENtion.Core.Net
             {
                 try
                 {
-                    if (!_running) return;
+                    if (!_running || _videoPaused) return;
                     int t = System.Threading.Interlocked.Increment(ref _ticksSinceFull);
                     if (FullRefreshIntervalTicks > 0 && t >= FullRefreshIntervalTicks)
                         SendUpdate(incremental: false);                       // periodic forced full repairs any delta drift
@@ -231,7 +304,7 @@ namespace ATENtion.Core.Net
         /// <summary>Watchdog body (off the timer thread): probe after a soft stall, fault after a hard one.</summary>
         private void WatchdogTick()
         {
-            if (!_running) return;
+            if (!_running || _videoPaused) return;   // no video expected, so silence proves nothing
             double idle = (DateTime.UtcNow - LastMessageUtc).TotalSeconds;
 
             // Hard stall: even a forced-full probe went unanswered -> declare the link dead.
@@ -307,6 +380,9 @@ namespace ATENtion.Core.Net
         /// (FUN_180011950 + FUN_180013060).</summary>
         private void SendUpdate(bool incremental)
         {
+            // The BMC only re-encodes on a non-incremental request; see AlwaysRequestFullFrames.
+            if (AlwaysRequestFullFrames) incremental = false;
+
             // Per-cycle message is JUST the FramebufferUpdateRequest. The original viewer sends
             // runImage ([7,0x0780]) only ONCE at startup, not every cycle (pcap) -
             // sending it per frame was ~hundreds of extra messages and likely extra BMC frames.
@@ -361,7 +437,7 @@ namespace ATENtion.Core.Net
                 SendUpdate(incremental: false); // first keyframe (bare FBUR)
                 // Prime the request pipeline: keep PipelineDepth FBURs in flight so the BMC encodes
                 // the next frame while the current one is decoded and presented (overlaps the round trip).
-                for (int i = 1; i < PipelineDepth; i++) SendUpdate(incremental: true);
+                for (int i = 1; i < EffectivePipelineDepth; i++) SendUpdate(incremental: true);
                 // Tell the BMC the configured mouse mode (native sends setMouseMode on connect). Absolute (1) is needed for the absolute pointer coordinates to track.
                 SendMouseMode(MouseMode);
                 // NOTE: do NOT auto-send hotPlug (0x3a). It appears to be a toggle/replug pulse with
@@ -382,10 +458,24 @@ namespace ATENtion.Core.Net
                     {
                         Controlling = msg.Controlling;
                         PrivilegeInfo = msg.PrivilegeInfo;
+
+                        // A record whose index did not decrease starts a fresh burst.
+                        if (msg.PrivilegeIndex >= _lastPrivilegeIndex) _pendingSessions.Clear();
+                        _lastPrivilegeIndex = msg.PrivilegeIndex;
+                        if (!string.IsNullOrWhiteSpace(msg.PrivilegeInfo))
+                            _pendingSessions.Add(msg.PrivilegeInfo);
+                        if (msg.PrivilegeIndex <= 1)
+                        {
+                            Sessions = _pendingSessions.ToArray();   // burst complete: publish it
+                            _lastPrivilegeIndex = 0;
+                        }
+
                         PrivilegeChanged?.Invoke(this, EventArgs.Empty);
                     }
+                    if (msg.NoVideoSignal) VideoSignal = VideoSignalState.Absent;
                     if (msg.IsFrame)
                     {
+                        VideoSignal = VideoSignalState.Present;
                         FramesDecoded++;
                         LastFrameUtc = DateTime.UtcNow;
                         System.Threading.Interlocked.Decrement(ref _outstanding); // this frame answered one request
@@ -403,7 +493,8 @@ namespace ATENtion.Core.Net
                             // PipelineDepth and cannot storm. The pump never blocks on the UI (the
                             // present is async), so it keeps draining the socket and the BMC keeps
                             // servicing input.
-                            while (_running && System.Threading.Volatile.Read(ref _outstanding) < PipelineDepth)
+                            while (_running && !_videoPaused &&
+                                   System.Threading.Volatile.Read(ref _outstanding) < EffectivePipelineDepth)
                                 SendUpdate(incremental: true);
                         }
                     }
@@ -711,6 +802,7 @@ namespace ATENtion.Core.Net
             try { _pumpThread?.Join(2000); } catch { }
             try { _senderThread?.Join(1000); } catch { }
             try { _inputSignal.Dispose(); } catch { }
+            try { Decoder?.Dispose(); } catch { }   // frees the native ASPEED context
         }
     }
 }

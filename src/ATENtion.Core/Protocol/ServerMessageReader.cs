@@ -28,6 +28,8 @@ namespace ATENtion.Core.Protocol
         public byte Type;
         /// <summary>Count of video payload bytes received for this message, for the bandwidth readout.</summary>
         public int PayloadBytes;
+        /// <summary>True when the update carried only the BMC's no-video-signal marker.</summary>
+        public bool NoVideoSignal;
         /// <summary>
         /// True when this message resized the decode surface (a resolution change). The pump
         /// responds by requesting one full keyframe so the new-size surface is repainted.
@@ -46,6 +48,9 @@ namespace ATENtion.Core.Protocol
         /// string, of the form <c>&lt;sid&gt; ROLE &lt;clientip&gt;</c>.
         /// </summary>
         public string PrivilegeInfo;
+        /// <summary>The privilege record's index. The BMC sends one record per active session,
+        /// counting down, so the first of a burst carries the session count and the last is 1.</summary>
+        public uint PrivilegeIndex;
     }
 
     /// <summary>
@@ -127,6 +132,7 @@ namespace ATENtion.Core.Protocol
                     foreach (var rect in fbu.Rects)
                     {
                         result.PayloadBytes += rect.Payload.Length;
+                        if (rect.IsNoSignal) result.NoVideoSignal = true;
                         if (rect.Payload.Length == 0) continue;
                         // A rectangle anchored at the top-left corner carries the current resolution,
                         // on both keyframes and incrementals (an incremental rect reports the live
@@ -194,6 +200,7 @@ namespace ATENtion.Core.Protocol
                         result.HasPrivilege = true;
                         result.Controlling = !(a == 1 && b == 4);
                         result.PrivilegeInfo = text.Trim();
+                        result.PrivilegeIndex = a;
                         ATENtion.Core.Diagnostics.KvmLog.Write(
                             $"  privilege 0x39: a={a} b={b} controlling={result.Controlling} info=\"{result.PrivilegeInfo}\"");
                         break;
