@@ -305,6 +305,10 @@ namespace ATENtion.App
                 try { _session.Dispose(); } catch { }
                 _session = null;
             }
+            // Virtual media is bound to the KVM session's credentials, so the BMC drops the mount
+            // when this session ends. Without this the menu still offers Unmount and the status bar
+            // still names the image, for media the BMC has already released.
+            ClearVmedia();
             _connectedAt = null;
             InfoText.Text = "";
             SetStatus("● Disconnected", StateRed);
