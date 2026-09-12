@@ -87,6 +87,17 @@ namespace ATENtion.Core.Net
         private Thread _serveThread;
         private readonly object _sendLock = new object();
         private volatile bool _running;
+        private Timer _keepAliveTimer;
+
+        /// <summary>Control frame type of the health request the BMC accepts as session liveness.</summary>
+        private const uint HealthControlType = 8;
+
+        /// <summary>
+        /// How often to send the health control frame on the data channel. The BMC tears the
+        /// virtual-media session down after roughly thirty seconds without traffic on that channel,
+        /// so this must stay comfortably below it.
+        /// </summary>
+        private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(10);
 
         /// <summary>Creates a virtual-media session bound to the given options.</summary>
         /// <param name="options">The host, port, and ISO image to serve.</param>
@@ -242,6 +253,30 @@ namespace ATENtion.Core.Net
             _running = true;
             _serveThread = new Thread(ServeLoop) { IsBackground = true, Name = "vmedia-serve" };
             _serveThread.Start();
+
+            // A guest only issues SCSI commands while it is actually reading the disc. Sitting at a
+            // boot menu, or once the installer has finished reading, the data channel falls silent
+            // and the BMC drops the session. Keep it busy with the health control frame.
+            _keepAliveTimer = new Timer(_ => SendKeepAlive(), null,
+                                        KeepAliveInterval, KeepAliveInterval);
+        }
+
+        // The health frame must go on the data channel: the BMC tracks liveness per session on that
+        // socket, and an exchange on a separately opened health channel does not reset its timer.
+        private void SendKeepAlive()
+        {
+            if (!_running) return;
+            try
+            {
+                lock (_sendLock) SendControl(HealthControlType);
+            }
+            catch (Exception ex)
+            {
+                if (!_running) return;
+                KvmLog.Error("vmedia keepalive", ex);
+                _running = false;
+                Faulted?.Invoke(this, ex);
+            }
         }
 
         private void ServeLoop()
@@ -345,6 +380,8 @@ namespace ATENtion.Core.Net
         public void Dispose()
         {
             _running = false;
+            try { _keepAliveTimer?.Dispose(); } catch { }
+            _keepAliveTimer = null;
             try { if (_stream != null) SendControl(5); } catch { }
             // The BMC normally answers type 5 with type 6, which lets the serve loop finish cleanly.
             // If it does not, close the socket after a short grace period to unblock the read.
