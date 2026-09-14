@@ -101,6 +101,33 @@ namespace ATENtion.App
             Name = existing.Name;
         }
 
+        /// <summary>Decides which saved profile, if any, this one should be saved over.</summary>
+        /// <param name="loadedName">The name of the profile the dialog was opened on, or empty.</param>
+        /// <remarks>
+        /// Identity follows the address. The dialog opens pre-filled with a saved profile, so typing a
+        /// different host into it must not overwrite that profile. A host and port that already have
+        /// a profile update it; any other address becomes a new profile. A name left over from the
+        /// profile the dialog opened on is replaced, since it described a different server.
+        /// </remarks>
+        internal void ResolveIdentity(string loadedName)
+        {
+            var store = StableSettingsStore.Get();
+            string previousId = Id ?? "";
+            var match = store.Profiles.FirstOrDefault(p => SameEndpoint(p.Host, p.Port, Host, Port));
+            Id = match?.Id ?? "";
+
+            if (Id != previousId &&
+                string.Equals((Name ?? "").Trim(), (loadedName ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+                Name = match != null ? match.Name : (Host ?? "").Trim();
+        }
+
+        private static bool SameEndpoint(string hostA, string portA, string hostB, string portB) =>
+            string.Equals((hostA ?? "").Trim(), (hostB ?? "").Trim(), StringComparison.OrdinalIgnoreCase) &&
+            NormalPort(portA) == NormalPort(portB);
+
+        private static string NormalPort(string port) =>
+            string.IsNullOrWhiteSpace(port) ? "5900" : port.Trim();
+
         /// <summary>Deletes a saved profile by identifier.</summary>
         /// <param name="id">The stable profile identifier; an empty value is ignored.</param>
         public static void Delete(string id)

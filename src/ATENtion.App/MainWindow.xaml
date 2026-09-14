@@ -116,14 +116,14 @@
                             IsCheckable="True" Tag="0" Click="OnFullRefreshInterval"
                             ToolTip="Send only incremental requests. Most ATEN/ASPEED firmware answers those from cache, so on such a BMC the screen stops updating until you reconnect or use View &#x2023; Refresh Screen."/>
                 </MenuItem>
-                <!-- The vendor viewer's "Display Preference": chroma/compression mode plus an image
-                     quality level. Both are sent with changeScreenInfo (0x32) and take effect on the
-                     running session. -->
                 <MenuItem x:Name="StreamAllTabsItem"
                         Header="Keep _background tabs streaming"
                         IsCheckable="True"
                         Click="OnToggleStreamAllTabs"
                         ToolTip="Off (default): only the visible tab requests video, so a hidden tab costs no bandwidth. On: every connected tab keeps streaming, which is useful for watching one machine boot while working on another - but each tab costs its own bandwidth, up to about 5 Mbps with Full frame requests set to Continuous."/>
+                <!-- The vendor viewer's "Display Preference": chroma/compression mode plus an image
+                     quality level. Both are sent with changeScreenInfo (0x32) and take effect on the
+                     running session. -->
                 <MenuItem Header="_Display preference">
                     <MenuItem x:Name="Mode444Item"
                             Header="Enhanced _text (4:4:4) - default"
@@ -162,6 +162,11 @@
                         Header="_Auto-reconnect on drop"
                         IsCheckable="True"
                         IsChecked="True"/>
+                <MenuItem x:Name="ReopenTabsItem"
+                        Header="Re_open tabs on startup"
+                        IsCheckable="True"
+                        IsChecked="True"
+                        ToolTip="Reconnect the saved servers that were open as tabs when ATENtion was closed"/>
                 <Separator/>
                 <MenuItem Header="_User List…"
                         Click="OnUserList"

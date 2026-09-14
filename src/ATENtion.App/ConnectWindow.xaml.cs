@@ -48,6 +48,7 @@ namespace ATENtion.App
 
         private List<ConnectSettings> _profiles;
         private string _editingProfileId = "";
+        private string _loadedName = "";
         private bool _loadingProfile;
 
         /// <summary>Builds the dialog, restoring the last-entered values and applying the arm gating.</summary>
@@ -79,6 +80,7 @@ namespace ATENtion.App
             try
             {
                 _editingProfileId = value?.Id ?? "";
+                _loadedName = value?.Name ?? "";
                 ProfileNameBox.Text = value?.Name ?? "";
                 HostBox.Text = value?.Host ?? "";
                 UserBox.Text = string.IsNullOrEmpty(value?.User) ? "ADMIN" : value.User;
@@ -152,6 +154,21 @@ namespace ATENtion.App
         // bundled stunnel and its client.crt/key). The same public vendor certificate ships in every
         // iKVM jar (CN=IPMI, O=Super Micro Computer), so it is embedded in the binary. A client.pfx next
         // to the executable overrides it, for a renewed certificate or a different firmware generation.
+        /// <summary>Builds connection options for a saved profile without showing the dialog.</summary>
+        /// <remarks>Tokens are not persisted, so a profile that does not arm via the web has none.</remarks>
+        internal static KvmConnectionOptions OptionsFor(ConnectSettings profile)
+        {
+            if (!int.TryParse(profile.Port, out int port)) port = 5900;
+            return new KvmConnectionOptions
+            {
+                Host = (profile.Host ?? "").Trim(),
+                Port = port,
+                Token = profile.Token ?? "",
+                UseTls = profile.Tls,
+                ClientCertificate = LoadClientCert(),
+            };
+        }
+
         private static X509Certificate2 LoadClientCert()
         {
             // 1. A disk override next to the executable.
@@ -228,8 +245,8 @@ namespace ATENtion.App
                 ClientCertificate = LoadClientCert(),
             };
 
-            // Save the editable profile immediately. If a credential is wrong, Connection > Connect /
-            // Change server opens this same profile so the user can correct it before another attempt.
+            // Save immediately, so a wrong credential can be corrected from Connection > Connect /
+            // Change server. A different address saves as a new profile rather than over this one.
             Profile = new ConnectSettings
             {
                 Id = _editingProfileId,
@@ -242,6 +259,7 @@ namespace ATENtion.App
                 Arm = ArmViaWeb,
                 Tls = TlsBox.IsChecked == true,
             };
+            Profile.ResolveIdentity(_loadedName);
             Profile.Save();
 
             DialogResult = true;

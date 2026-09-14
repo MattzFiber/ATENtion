@@ -64,6 +64,9 @@ namespace ATENtion.App
         // Connection/overlay state.
         public bool LiveConnected;
         public bool UserDisconnected;
+        /// <summary>Report a failed first connection on the tab only, not in a dialog.</summary>
+        /// <remarks>Set for tabs reopened at startup, where one dialog per unreachable server would stack.</remarks>
+        public bool QuietFailures;
         public DateTime? ConnectedAt;
         public int NoFrameTicks;
         public int ButtonMask;

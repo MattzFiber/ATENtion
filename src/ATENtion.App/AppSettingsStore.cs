@@ -55,6 +55,12 @@ namespace ATENtion.App
         /// <summary>True to let tabs that are not visible keep requesting video.</summary>
         public bool StreamAllTabs;
         public string LastProfileId = "";
+        /// <summary>Reopen the tabs that were open when the window closed.</summary>
+        public bool ReopenTabs = true;
+        /// <summary>Profile ids of the tabs open at exit, in tab order.</summary>
+        public readonly List<string> OpenProfileIds = new List<string>();
+        /// <summary>Profile id of the tab that was visible at exit.</summary>
+        public string ActiveProfileId = "";
         public readonly List<StoredConnectionProfile> Profiles = new List<StoredConnectionProfile>();
 
         internal static string SettingsPath => _settingsPathOverride ?? Path.Combine(
@@ -101,7 +107,12 @@ namespace ATENtion.App
                     new XAttribute("fullRefreshSeconds", FullFrameIntervalSeconds),
                     new XAttribute("imageMode", ImageMode),
                     new XAttribute("imageQuality", ImageQuality),
-                    new XAttribute("streamAllTabs", StreamAllTabs));
+                    new XAttribute("streamAllTabs", StreamAllTabs),
+                    new XAttribute("reopenTabs", ReopenTabs));
+
+                var tabs = new XElement("OpenTabs", new XAttribute("active", ActiveProfileId ?? ""));
+                foreach (string id in OpenProfileIds)
+                    if (!string.IsNullOrEmpty(id)) tabs.Add(new XElement("Tab", new XAttribute("profile", id)));
 
                 var profiles = new XElement("Connections",
                     new XAttribute("lastProfileId", LastProfileId ?? ""));
@@ -119,7 +130,7 @@ namespace ATENtion.App
                 }
 
                 var document = new XDocument(
-                    new XElement("ATENtionSettings", new XAttribute("formatVersion", "1"), ui, profiles));
+                    new XElement("ATENtionSettings", new XAttribute("formatVersion", "1"), ui, profiles, tabs));
                 string temporary = path + ".tmp";
                 document.Save(temporary);
                 if (!File.Exists(path))
@@ -144,8 +155,8 @@ namespace ATENtion.App
 
             try
             {
-                var root = XDocument.Load(path).Root;
-                if (root == null) return MigrateLegacy();
+                var root = LoadWithRetry(path).Root;
+                if (root == null) { PreserveUnreadable(path); return MigrateLegacy(); }
                 var result = new StableSettingsStore();
                 var ui = root.Element("Ui");
                 if (ui != null)
@@ -165,6 +176,7 @@ namespace ATENtion.App
                     result.ImageMode = Int(ui, "imageMode", 444);
                     result.ImageQuality = Int(ui, "imageQuality", 11);
                     result.StreamAllTabs = Bool(ui, "streamAllTabs");
+                    result.ReopenTabs = Bool(ui, "reopenTabs", true);
                 }
 
                 var connections = root.Element("Connections");
@@ -188,13 +200,45 @@ namespace ATENtion.App
                         });
                     }
                 }
+                var tabs = root.Element("OpenTabs");
+                if (tabs != null)
+                {
+                    result.ActiveProfileId = Text(tabs, "active");
+                    foreach (var tab in tabs.Elements("Tab"))
+                    {
+                        string id = Text(tab, "profile");
+                        if (id.Length > 0) result.OpenProfileIds.Add(id);
+                    }
+                }
                 return result;
             }
             catch (Exception ex)
             {
                 Core.Diagnostics.KvmLog.Error("loading stable settings", ex);
+                // Migration saves a fresh file, which would silently discard every profile in one
+                // that merely failed to read. Keep a copy first.
+                PreserveUnreadable(path);
                 return MigrateLegacy();
             }
+        }
+
+        private static XDocument LoadWithRetry(string path)
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                try { return XDocument.Load(path); }
+                catch (IOException) when (attempt < 4) { System.Threading.Thread.Sleep(50 * attempt); }
+            }
+        }
+
+        private static void PreserveUnreadable(string path)
+        {
+            try
+            {
+                string backup = path + ".unreadable-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                if (File.Exists(path) && !File.Exists(backup)) File.Copy(path, backup);
+            }
+            catch (Exception ex) { Core.Diagnostics.KvmLog.Error("preserving unreadable settings", ex); }
         }
 
         private static StableSettingsStore MigrateLegacy()
